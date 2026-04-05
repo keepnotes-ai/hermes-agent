@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from agent.memory_provider import MemoryProvider
 from agent.memory_manager import MemoryManager
 from agent.builtin_memory_provider import BuiltinMemoryProvider
+from plugins.memory.keep import KeepMemoryProvider
 
 
 # ---------------------------------------------------------------------------
@@ -524,6 +525,81 @@ class TestSingleProviderGating:
 
         assert mgr.provider_names == ["builtin"]
 
+
+class TestKeepPluginCompatibility:
+    def test_keep_flow_hoists_flattened_args_into_params(self):
+        provider = KeepMemoryProvider()
+        captured = {}
+
+        class Impl:
+            def handle_tool_call(self, tool_name, args, **kwargs):
+                captured["tool_name"] = tool_name
+                captured["args"] = args
+                return '{"ok": true}'
+
+        provider._impl = Impl()
+
+        result = provider.handle_tool_call(
+            "keep_flow",
+            {"state": "get", "id": ".library", "include_hidden": True},
+        )
+
+        assert json.loads(result) == {"ok": True}
+        assert captured["tool_name"] == "keep_flow"
+        assert captured["args"]["params"] == {
+            "id": ".library",
+            "include_hidden": True,
+        }
+
+    def test_keep_flow_parses_json_string_params(self):
+        provider = KeepMemoryProvider()
+        captured = {}
+
+        class Impl:
+            def handle_tool_call(self, tool_name, args, **kwargs):
+                captured["args"] = args
+                return '{"ok": true}'
+
+        provider._impl = Impl()
+
+        provider.handle_tool_call(
+            "keep_flow",
+            {"state": "get", "params": '{"id": ".library/mn61"}'},
+        )
+
+        assert captured["args"]["params"] == {"id": ".library/mn61"}
+
+    def test_keep_flow_reports_invalid_json_string_params(self):
+        provider = KeepMemoryProvider()
+        provider._impl = object()
+
+        result = json.loads(provider.handle_tool_call(
+            "keep_flow",
+            {"state": "get", "params": '{"id": '},
+        ))
+
+        assert "error" in result
+        assert "JSON object" in result["error"]
+
+    def test_keep_flow_does_not_hoist_unknown_top_level_keys(self):
+        provider = KeepMemoryProvider()
+        captured = {}
+
+        class Impl:
+            def handle_tool_call(self, tool_name, args, **kwargs):
+                captured["args"] = args
+                return '{"ok": true}'
+
+        provider._impl = Impl()
+
+        provider.handle_tool_call(
+            "keep_flow",
+            {"state": "get", "id": ".library", "unexpected": "value"},
+        )
+
+        assert captured["args"]["params"] == {"id": ".library"}
+        assert "unexpected" in captured["args"]
+        assert "unexpected" not in captured["args"]["params"]
 
 class TestPluginMemoryDiscovery:
     """Memory providers are discovered from plugins/memory/ directory."""

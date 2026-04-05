@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any, Dict, List
 
 from agent.memory_provider import MemoryProvider
@@ -33,33 +32,70 @@ from agent.memory_provider import MemoryProvider
 logger = logging.getLogger(__name__)
 
 _KEEP_FLOW_CONTROL_KEYS = {"state", "params", "token_budget", "cursor", "state_doc_yaml", "budget"}
+# ``keep_flow`` is a generic state-doc entry point: ``state`` selects the
+# operation, while operation-specific arguments live inside the nested
+# ``params`` object. Keep those control keys separate from actual flow params.
+# Keep the compatibility shim intentionally narrow. Unknown top-level keys
+# should pass through unchanged so schema drift or model mistakes stay visible.
+_KEEP_FLOW_PARAM_KEYS = {
+    "id",
+    "item_id",
+    "prefix",
+    "include_hidden",
+    "query",
+    "tags",
+    "scope",
+    "since",
+    "until",
+    "limit",
+    "similar_limit",
+    "parts_limit",
+    "meta_limit",
+    "edges_limit",
+    "content",
+    "uri",
+}
 
 
 def _coerce_params(value: Any) -> Dict[str, Any]:
-    """Accept dict or JSON-string params from chat/tool surfaces."""
+    """Normalize the nested ``keep_flow.params`` payload to a dict.
+
+    Keep expects operation arguments such as ``id``, ``query``, or ``uri``
+    inside ``params`` because the top level is reserved for flow controls like
+    ``state``, ``cursor``, and ``token_budget``.
+
+    Some chat/tool surfaces serialize that nested object as a JSON string
+    before it reaches the plugin. Accept that form here so the wrapper still
+    passes the canonical dict shape to keep.
+
+    String params are only accepted when they decode to a JSON object.
+    Invalid JSON should fail clearly instead of being treated as an empty
+    params dict, which would hide transport bugs.
+    """
     if isinstance(value, dict):
         return dict(value)
     if isinstance(value, str) and value.strip():
         try:
             parsed = json.loads(value)
         except json.JSONDecodeError:
-            return {}
+            raise ValueError("keep_flow params must be a JSON object when passed as a string")
         if isinstance(parsed, dict):
             return parsed
+        raise ValueError("keep_flow params must decode to a JSON object")
     return {}
-
-
-def _raw_keep_results_enabled() -> bool:
-    value = os.getenv("HERMES_KEEP_RAW_RESULTS") or os.getenv("HERMES_MEMORY_TOOLS_RAW")
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _normalize_tool_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     """Compatibility normalization at the keep plugin boundary.
 
     Hermes should keep passing the canonical schema, but this layer makes the
-    keep plugin resilient to chat surfaces that flatten flow params or turn the
-    params object into a JSON string.
+    keep plugin resilient to two observed chat-surface issues:
+    - ``params`` arrives as a JSON object string
+    - a small set of known flow params are flattened to the top level
+
+    The normalization is deliberately conservative. Unknown top-level keys are
+    not hoisted into ``params`` so unexpected inputs remain visible to Hermes
+    and keep rather than being silently reinterpreted here.
     """
     if not isinstance(args, dict):
         return {}
@@ -70,13 +106,10 @@ def _normalize_tool_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]
 
     params = _coerce_params(normalized.get("params"))
     for key, value in args.items():
-        if key not in _KEEP_FLOW_CONTROL_KEYS:
+        if key in _KEEP_FLOW_PARAM_KEYS and key not in _KEEP_FLOW_CONTROL_KEYS:
             params.setdefault(key, value)
     if params:
         normalized["params"] = params
-
-    if _raw_keep_results_enabled() and "token_budget" not in normalized:
-        normalized["token_budget"] = 0
 
     return normalized
 
@@ -153,7 +186,7 @@ class KeepMemoryProvider(MemoryProvider):
             logger.warning("keep: impl not available, skipping initialize")
             return
         self._impl.initialize(session_id, **kwargs)
-        logger.info("keep: initialized (keeper=%s)", self._impl._keeper is not None)
+        logger.info("keep: initialized")
 
     def shutdown(self) -> None:
         if self._impl is not None:
@@ -240,17 +273,20 @@ class KeepMemoryProvider(MemoryProvider):
     def handle_tool_call(
         self, tool_name: str, args: Dict[str, Any], **kwargs
     ) -> str:
-        normalized_args = _normalize_tool_args(tool_name, args)
         logger.info("keep: handle_tool_call(%s)", tool_name)
-        logger.debug("keep: raw args for %s: %s", tool_name, args)
-        if normalized_args != args:
-            logger.debug("keep: normalized args for %s: %s", tool_name, normalized_args)
         if self._impl is None:
             logger.warning("keep: handle_tool_call but impl is None")
             return '{"error": "keep-skill is not installed"}'
+        try:
+            normalized_args = _normalize_tool_args(tool_name, args)
+        except ValueError as e:
+            logger.debug("keep: invalid args for %s: %s", tool_name, e)
+            return json.dumps({"error": str(e)})
+        logger.debug("keep: raw args for %s: %s", tool_name, args)
+        if normalized_args != args:
+            logger.debug("keep: normalized args for %s: %s", tool_name, normalized_args)
         result = self._impl.handle_tool_call(tool_name, normalized_args, **kwargs)
         logger.debug("keep: raw result for %s: %s", tool_name, result)
-        logger.info("keep: handle_tool_call(%s) -> %s", tool_name, result[:200])
         return result
 
 
