@@ -4,21 +4,41 @@ Reflective memory via the `keep-skill` daemon. Keep adds semantic search, versio
 
 ## Requirements
 
-- `uv pip install keep-skill`
-- Run `hermes memory setup` and select `keep`
+- `keep-skill` Python package
+- one embedding provider
+- optionally, one summarization provider
 
 ## Setup
 
 ```bash
-uv pip install keep-skill
 hermes memory setup    # select "keep", choose providers
 ```
 
-Always use `hermes memory setup` — it bootstraps the Keep store config (embedding/summarization providers) and writes `KEEP_STORE_PATH` to `.env`. Setting `memory.provider` manually without running setup leaves the store uninitialized.
+`hermes memory setup` is the normal install path. The setup wizard installs `keep-skill` into the Hermes environment if needed, then bootstraps the Keep store config and writes `KEEP_STORE_PATH` to `.env`.
 
-## Store location
+Or manually:
 
-The setup wizard creates the store at `$HERMES_HOME/keep` (e.g. `~/.hermes/keep`). If `KEEP_STORE_PATH` is set in the environment, `initialize()` uses that path instead.
+```bash
+hermes config set memory.provider keep
+pip install keep-skill
+```
+
+If you install manually, still run `hermes memory setup` afterward to initialize the Keep store.
+
+## Config
+
+Store location: `$HERMES_HOME/keep` (for example `~/.hermes/keep`).
+
+If `KEEP_STORE_PATH` is already set in the environment, Keep uses that path instead.
+
+Provider availability is determined by `keep-skill`. Common options include:
+
+| Purpose | Common options |
+|---------|----------------|
+| Embeddings | `Ollama`, `OpenAI` (`OPENAI_API_KEY`), `OpenRouter` (`OPENROUTER_API_KEY`), `Gemini` (`GEMINI_API_KEY`), `Voyage` (`VOYAGE_API_KEY`), `Mistral` (`MISTRAL_API_KEY`) |
+| Summarization | `Ollama`, `Anthropic` (`ANTHROPIC_API_KEY`), `OpenAI`, `OpenRouter`, `Gemini`, `Mistral` |
+
+`hermes memory setup` only offers providers that are available in the current environment.
 
 ## Tools
 
