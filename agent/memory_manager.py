@@ -169,10 +169,28 @@ class MemoryManager:
 
     # -- Sync ----------------------------------------------------------------
 
-    def sync_all(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
+    def sync_all(
+        self,
+        user_content: str,
+        assistant_content: str,
+        *,
+        session_id: str = "",
+        user_id: str = "",
+        user_name: str = "",
+    ) -> None:
         """Sync a completed turn to all providers."""
         for provider in self._providers:
             try:
+                provider.sync_turn(
+                    user_content,
+                    assistant_content,
+                    session_id=session_id,
+                    user_id=user_id,
+                    user_name=user_name,
+                )
+            except TypeError:
+                # Legacy providers whose sync_turn doesn't accept
+                # user_id / user_name yet — fall back to old signature.
                 provider.sync_turn(user_content, assistant_content, session_id=session_id)
             except Exception as e:
                 logger.warning(

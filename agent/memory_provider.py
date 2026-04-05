@@ -111,11 +111,23 @@ class MemoryProvider(ABC):
         that do background prefetching should override this.
         """
 
-    def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
+    def sync_turn(
+        self,
+        user_content: str,
+        assistant_content: str,
+        *,
+        session_id: str = "",
+        user_id: str = "",
+        user_name: str = "",
+    ) -> None:
         """Persist a completed turn to the backend.
 
         Called after each turn. Should be non-blocking — queue for
         background processing if the backend has latency.
+
+        user_id / user_name identify the human who sent the message.
+        Providers that build per-user context (contact graphs, identity
+        tagging) should propagate these to their backend.
         """
 
     @abstractmethod

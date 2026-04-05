@@ -55,8 +55,18 @@ class FakeMemoryProvider(MemoryProvider):
     def queue_prefetch(self, query, *, session_id=""):
         self.queued_prefetches.append(query)
 
-    def sync_turn(self, user_content, assistant_content, *, session_id=""):
-        self.synced_turns.append((user_content, assistant_content))
+    def sync_turn(
+        self,
+        user_content,
+        assistant_content,
+        *,
+        session_id="",
+        user_id="",
+        user_name="",
+    ):
+        self.synced_turns.append(
+            (user_content, assistant_content, session_id, user_id, user_name)
+        )
 
     def get_tool_schemas(self):
         return self._tools
@@ -228,9 +238,34 @@ class TestMemoryManager:
         mgr.add_provider(p1)
         mgr.add_provider(p2)
 
-        mgr.sync_all("user msg", "assistant msg")
-        assert p1.synced_turns == [("user msg", "assistant msg")]
-        assert p2.synced_turns == [("user msg", "assistant msg")]
+        mgr.sync_all(
+            "user msg",
+            "assistant msg",
+            session_id="s1",
+            user_id="u1",
+            user_name="Alice",
+        )
+        assert p1.synced_turns == [("user msg", "assistant msg", "s1", "u1", "Alice")]
+        assert p2.synced_turns == [("user msg", "assistant msg", "s1", "u1", "Alice")]
+
+    def test_sync_all_falls_back_for_legacy_provider_signature(self):
+        mgr = MemoryManager()
+
+        class LegacyProvider(FakeMemoryProvider):
+            def sync_turn(self, user_content, assistant_content, *, session_id=""):
+                self.synced_turns.append((user_content, assistant_content, session_id))
+
+        p = LegacyProvider("legacy")
+        mgr.add_provider(p)
+
+        mgr.sync_all(
+            "user msg",
+            "assistant msg",
+            session_id="s1",
+            user_id="u1",
+            user_name="Alice",
+        )
+        assert p.synced_turns == [("user msg", "assistant msg", "s1")]
 
     def test_sync_failure_doesnt_block_others(self):
         """If one provider's sync fails, others still run."""
@@ -243,7 +278,7 @@ class TestMemoryManager:
 
         mgr.sync_all("user", "assistant")
         # p1 failed but p2 still synced
-        assert p2.synced_turns == [("user", "assistant")]
+        assert p2.synced_turns == [("user", "assistant", "", "", "")]
 
     # -- Tool routing -------------------------------------------------------
 

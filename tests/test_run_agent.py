@@ -1428,6 +1428,28 @@ class TestRunConversation:
         assert result["final_response"] == "Final answer"
         assert result["completed"] is True
 
+    def test_memory_sync_includes_turn_user_identity(self, agent):
+        self._setup_agent(agent)
+        resp = _mock_response(content="Final answer", finish_reason="stop")
+        agent.client.chat.completions.create.return_value = resp
+        agent._memory_manager = MagicMock()
+        agent.user_id = "u1"
+        agent.user_name = "Alice"
+        with (
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+        ):
+            agent.run_conversation("hello")
+
+        agent._memory_manager.sync_all.assert_called_once_with(
+            "hello",
+            "Final answer",
+            session_id=agent.session_id,
+            user_id="u1",
+            user_name="Alice",
+        )
+
     def test_tool_calls_then_stop(self, agent):
         self._setup_agent(agent)
         tc = _mock_tool_call(name="web_search", arguments="{}", call_id="c1")

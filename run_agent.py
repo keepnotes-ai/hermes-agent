@@ -949,6 +949,11 @@ class AIAgent:
         
         # Track conversation messages for session logging
         self._session_messages: List[Dict[str, Any]] = []
+        # Per-turn sender identity — set by gateway from source metadata
+        # before each run_conversation call; forwarded to memory providers
+        # so they can build per-user context (contact edges, identity tags).
+        self.user_id: Optional[str] = None
+        self.user_name: Optional[str] = None
         
         # Cached system prompt -- built once per session, only rebuilt on compression
         self._cached_system_prompt: Optional[str] = None
@@ -8673,7 +8678,13 @@ class AIAgent:
         # injected skill content that bloats / breaks provider queries.
         if self._memory_manager and final_response and original_user_message:
             try:
-                self._memory_manager.sync_all(original_user_message, final_response)
+                self._memory_manager.sync_all(
+                    original_user_message,
+                    final_response,
+                    session_id=self.session_id,
+                    user_id=self.user_id or "",
+                    user_name=self.user_name or "",
+                )
                 self._memory_manager.queue_prefetch_all(original_user_message)
             except Exception:
                 pass

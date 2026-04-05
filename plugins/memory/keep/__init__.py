@@ -216,9 +216,24 @@ class KeepMemoryProvider(MemoryProvider):
         assistant_content: str,
         *,
         session_id: str = "",
+        user_id: str = "",
+        user_name: str = "",
     ) -> None:
         if self._impl is not None:
-            self._impl.sync_turn(user_content, assistant_content, session_id=session_id)
+            try:
+                self._impl.sync_turn(
+                    user_content,
+                    assistant_content,
+                    session_id=session_id,
+                    user_id=user_id,
+                    user_name=user_name,
+                )
+            except TypeError:
+                # Older keep versions whose sync_turn doesn't accept
+                # user_id / user_name — fall back to session-only call.
+                self._impl.sync_turn(
+                    user_content, assistant_content, session_id=session_id
+                )
 
     def on_turn_start(self, turn_number: int, message: str, **kwargs) -> None:
         if self._impl is not None:
