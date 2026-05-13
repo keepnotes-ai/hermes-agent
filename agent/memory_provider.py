@@ -144,9 +144,10 @@ class MemoryProvider(ABC):
     def on_turn_start(self, turn_number: int, message: str, **kwargs) -> None:
         """Called at the start of each turn with the user message.
 
-        Use for turn-counting, scope management, periodic maintenance.
+        Use for turn-counting, scope management, attribution, and periodic maintenance.
 
-        kwargs may include: remaining_tokens, model, platform, tool_count.
+        kwargs may include: remaining_tokens, model, platform, tool_count,
+        user_id, user_name, and session_title.
         Providers use what they need; extras are ignored.
         """
 

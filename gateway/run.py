@@ -10302,6 +10302,8 @@ class GatewayRunner:
                     return agent.run_conversation(
                         user_message=prompt,
                         task_id=task_id,
+                        turn_user_id=source.user_id,
+                        turn_user_name=source.user_name,
                     )
                 finally:
                     self._cleanup_agent_resources(agent)
@@ -15327,7 +15329,13 @@ class GatewayRunner:
                 else:
                     _run_message = message
 
-                result = agent.run_conversation(_run_message, conversation_history=agent_history, task_id=session_id)
+                result = agent.run_conversation(
+                    _run_message,
+                    conversation_history=agent_history,
+                    task_id=session_id,
+                    turn_user_id=source.user_id,
+                    turn_user_name=source.user_name,
+                )
             finally:
                 unregister_gateway_notify(_approval_session_key)
                 # Cancel any pending clarify entries so blocked agent

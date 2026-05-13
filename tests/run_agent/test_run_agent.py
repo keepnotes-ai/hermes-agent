@@ -13,7 +13,7 @@ import uuid
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from agent.codex_responses_adapter import _chat_messages_to_responses_input, _normalize_codex_response, _preflight_codex_input_items
@@ -2475,6 +2475,68 @@ class TestRunConversation:
             result = agent.run_conversation("hello")
         assert result["final_response"] == "Final answer"
         assert result["completed"] is True
+
+    def test_turn_context_reaches_memory_manager_before_prefetch(self, agent):
+        self._setup_agent(agent)
+        resp = _mock_response(content="Final answer", finish_reason="stop")
+        agent.client.chat.completions.create.return_value = resp
+        agent.platform = "telegram"
+        agent.session_id = "sess-123"
+        agent._user_id = "stale-user"
+        agent._memory_manager = MagicMock()
+        agent._memory_manager.prefetch_all.return_value = ""
+        agent._session_db = MagicMock()
+        agent._session_db.get_session_title.return_value = "Thread Research"
+
+        with (
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+        ):
+            result = agent.run_conversation(
+                "hello",
+                turn_user_id="u-42",
+                turn_user_name="Alice",
+            )
+
+        assert result["final_response"] == "Final answer"
+        relevant_calls = [
+            c for c in agent._memory_manager.mock_calls
+            if c[0] in {"on_turn_start", "prefetch_all"}
+        ]
+        assert relevant_calls[:2] == [
+            call.on_turn_start(
+                1,
+                "hello",
+                platform="telegram",
+                user_id="u-42",
+                user_name="Alice",
+                session_title="Thread Research",
+            ),
+            call.prefetch_all("hello"),
+        ]
+
+    def test_empty_turn_user_id_falls_back_to_cached_user(self, agent):
+        self._setup_agent(agent)
+        resp = _mock_response(content="Final answer", finish_reason="stop")
+        agent.client.chat.completions.create.return_value = resp
+        agent._user_id = "cached-user"
+        agent._memory_manager = MagicMock()
+        agent._memory_manager.prefetch_all.return_value = ""
+
+        with (
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+        ):
+            result = agent.run_conversation("hello", turn_user_id="")
+
+        assert result["final_response"] == "Final answer"
+        agent._memory_manager.on_turn_start.assert_any_call(
+            1,
+            "hello",
+            user_id="cached-user",
+        )
 
     def test_tool_calls_then_stop(self, agent):
         self._setup_agent(agent)

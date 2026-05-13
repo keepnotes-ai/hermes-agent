@@ -5658,6 +5658,35 @@ class AIAgent:
         except Exception:
             pass
 
+    def _build_memory_turn_context(
+        self,
+        *,
+        turn_user_id: Optional[str] = None,
+        turn_user_name: Optional[str] = None,
+    ) -> Dict[str, str]:
+        """Collect per-turn attribution context for external memory providers."""
+        context: Dict[str, str] = {}
+
+        if self.platform:
+            context["platform"] = str(self.platform)
+
+        user_id = turn_user_id or self._user_id
+        if user_id:
+            context["user_id"] = str(user_id)
+
+        if turn_user_name:
+            context["user_name"] = str(turn_user_name)
+
+        if self._session_db and self.session_id:
+            try:
+                session_title = self._session_db.get_session_title(self.session_id)
+            except Exception:
+                session_title = None
+            if session_title:
+                context["session_title"] = str(session_title)
+
+        return context
+
     def release_clients(self) -> None:
         """Release LLM client resources WITHOUT tearing down session tool state.
 
@@ -11690,6 +11719,8 @@ class AIAgent:
         task_id: str = None,
         stream_callback: Optional[callable] = None,
         persist_user_message: Optional[str] = None,
+        turn_user_id: Optional[str] = None,
+        turn_user_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run a complete conversation with tool calling until completion.
@@ -11705,7 +11736,12 @@ class AIAgent:
             persist_user_message: Optional clean user message to store in
                 transcripts/history when user_message contains API-only
                 synthetic prefixes.
-                    or queuing follow-up prefetch work.
+                or queuing follow-up prefetch work.
+            turn_user_id: Optional per-message user identifier supplied by the
+                host. This can differ from the cached agent user in shared
+                thread sessions.
+            turn_user_name: Optional per-message display name supplied by the
+                host for memory-provider attribution in shared sessions.
 
         Returns:
             Dict: Complete conversation result with final response and message history
@@ -12098,9 +12134,13 @@ class AIAgent:
         if self._memory_manager:
             try:
                 _turn_msg = original_user_message if isinstance(original_user_message, str) else ""
-                self._memory_manager.on_turn_start(self._user_turn_count, _turn_msg)
-            except Exception:
-                pass
+                _turn_context = self._build_memory_turn_context(
+                    turn_user_id=turn_user_id,
+                    turn_user_name=turn_user_name,
+                )
+                self._memory_manager.on_turn_start(self._user_turn_count, _turn_msg, **_turn_context)
+            except Exception as e:
+                logger.debug("External memory provider turn-start hook failed: %s", e)
 
         # External memory provider: prefetch once before the tool loop.
         # Reuse the cached result on every iteration to avoid re-calling
